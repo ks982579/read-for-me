@@ -1,0 +1,47 @@
+models:
+  # Small models for laptops with limited GPU memory
+  small:
+    - "microsoft/DialoGPT-small"
+    - "google/flan-t5-small"
+    - "distilbert-base-uncased"
+
+  # Medium models for moderate GPU capacity
+  medium:
+    - "microsoft/DialoGPT-medium"
+    - "google/flan-t5-base"
+    - "facebook/bart-base"
+
+  # Large models for high-end GPUs
+  large:
+    - "microsoft/DialoGPT-large"
+    - "google/flan-t5-large"
+    - "facebook/bart-large"
+
+# Default model configuration
+default_model: "microsoft/DialoGPT-medium"
+
+# Text processing settings
+chunking:
+  max_chunk_size: 2048      # Maximum tokens per chunk
+  overlap_size: 200         # Overlap between chunks
+  strategy: "smart"         # Options: smart, sentences, tokens
+
+# Note generation settings
+generation:
+  max_new_tokens: 400
+  temperature: 0.7
+  top_p: 0.9
+  do_sample: true
+
+# Output settings
+output:
+  format: "markdown"        # Currently only markdown supported
+  include_summary: true
+  obsidian_compatible: false
+  include_page_references: true
+
+# Device settings
+device:
+  auto_detect: true
+  preferred: "cuda"         # Options: cuda, mps, cpu
+  fallback: "cpu"

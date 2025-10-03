@@ -1,0 +1,9 @@
+pymupdf==1.23.8
+transformers==4.35.0
+torch==2.1.0
+accelerate==0.24.1
+sentencepiece==0.1.99
+protobuf==4.24.4
+click==8.1.7
+tqdm==4.66.1
+tiktoken==0.5.1
