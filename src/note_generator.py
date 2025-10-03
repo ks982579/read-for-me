@@ -33,40 +33,53 @@ class NoteGenerator:
         return device
 
     def load_model(self):
-        try:
-            if "flan-t5" in self.model_name.lower():
-                self.pipeline = pipeline(
-                    "text2text-generation",
-                    model=self.model_name,
-                    device=0 if self.device == "cuda" else -1,
-                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32
-                )
-            else:
-                self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-                if self.tokenizer.pad_token is None:
-                    self.tokenizer.pad_token = self.tokenizer.eos_token
+        max_retries = 2
+        fallback_models = [self.model_name, "microsoft/DialoGPT-small", "distilgpt2"]
 
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    self.model_name,
-                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                    device_map="auto" if self.device == "cuda" else None
-                )
+        for attempt, model_name in enumerate(fallback_models):
+            try:
+                print(f"Loading model: {model_name}...")
 
-                if self.device != "cuda":
-                    self.model = self.model.to(self.device)
+                if "flan-t5" in model_name.lower():
+                    # For T5 models, use text2text-generation
+                    self.pipeline = pipeline(
+                        "text2text-generation",
+                        model=model_name,
+                        device_map="auto" if self.device == "cuda" else None,
+                        torch_dtype=torch.float16 if self.device == "cuda" else torch.float32
+                    )
+                else:
+                    # For GPT models, don't specify device in pipeline - let accelerate handle it
+                    self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+                    if self.tokenizer.pad_token is None:
+                        self.tokenizer.pad_token = self.tokenizer.eos_token
 
-                self.pipeline = pipeline(
-                    "text-generation",
-                    model=self.model,
-                    tokenizer=self.tokenizer,
-                    device=0 if self.device == "cuda" else -1
-                )
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                        device_map="auto" if torch.cuda.is_available() else None,
+                        low_cpu_mem_usage=True
+                    )
 
-        except Exception as e:
-            print(f"Error loading model {self.model_name}: {e}")
-            print("Falling back to smaller model...")
-            self.model_name = "microsoft/DialoGPT-small"
-            self.load_model()
+                    # Create pipeline without specifying device - accelerate will handle it
+                    self.pipeline = pipeline(
+                        "text-generation",
+                        model=self.model,
+                        tokenizer=self.tokenizer,
+                        torch_dtype=torch.float16 if self.device == "cuda" else torch.float32
+                    )
+
+                self.model_name = model_name
+                print(f"✅ Successfully loaded model: {model_name}")
+                return
+
+            except Exception as e:
+                print(f"❌ Error loading model {model_name}: {e}")
+                if attempt < len(fallback_models) - 1:
+                    print(f"Trying fallback model...")
+                else:
+                    print("❌ All model loading attempts failed!")
+                    raise RuntimeError(f"Failed to load any model. Last error: {e}")
 
     def generate_note_from_chunk(self, chunk: TextChunk) -> GeneratedNote:
         prompt = self._create_note_prompt(chunk.content, chunk.chapter_title)
