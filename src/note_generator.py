@@ -40,11 +40,14 @@ class NoteGenerator:
             try:
                 print(f"Loading model: {model_name}...")
 
-                if "flan-t5" in model_name.lower():
-                    # For T5 models, use text2text-generation
+                if "flan-t5" in model_name.lower() or "bart" in model_name.lower():
+                    # For T5 and BART models, use text2text-generation or summarization
+                    self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+                    task = "summarization" if "bart" in model_name.lower() else "text2text-generation"
                     self.pipeline = pipeline(
-                        "text2text-generation",
+                        task,
                         model=model_name,
+                        tokenizer=self.tokenizer,
                         device_map="auto" if self.device == "cuda" else None,
                         torch_dtype=torch.float16 if self.device == "cuda" else torch.float32
                     )
@@ -85,10 +88,27 @@ class NoteGenerator:
         prompt = self._create_note_prompt(chunk.content, chunk.chapter_title)
 
         try:
-            if "flan-t5" in self.model_name.lower():
+            if "flan-t5" in self.model_name.lower() or "bart" in self.model_name.lower():
+                # Get model's max context window from tokenizer or model config
+                max_context_length = self.tokenizer.model_max_length if hasattr(self.tokenizer, 'model_max_length') else 512
+
+                # BART returns an unreasonably large number, use config instead
+                if max_context_length > 100000:
+                    if hasattr(self.pipeline.model.config, 'max_position_embeddings'):
+                        max_context_length = self.pipeline.model.config.max_position_embeddings
+                    else:
+                        max_context_length = 1024  # Safe default
+
+                # Reserve 70% for input, 30% for output
+                max_input_tokens = int(max_context_length * 0.7)
+
+                # Truncate input to fit within model limits
+                input_tokens = self.tokenizer.encode(prompt, truncation=True, max_length=max_input_tokens)
+                truncated_prompt = self.tokenizer.decode(input_tokens, skip_special_tokens=True)
+
                 response = self.pipeline(
-                    prompt,
-                    max_length=512,
+                    truncated_prompt,
+                    max_length=max_context_length,
                     do_sample=True,
                     temperature=0.7,
                     top_p=0.9,
@@ -96,9 +116,18 @@ class NoteGenerator:
                 )
                 note_content = response[0]['generated_text'].strip()
             else:
+                # For GPT-style models, check if we need to truncate
+                max_input_tokens = self.tokenizer.model_max_length if hasattr(self.tokenizer, 'model_max_length') else 2048
+                max_output_tokens = 400
+
+                # Leave room for output tokens
+                input_limit = max_input_tokens - max_output_tokens
+                input_tokens = self.tokenizer.encode(prompt, truncation=True, max_length=input_limit)
+                truncated_prompt = self.tokenizer.decode(input_tokens, skip_special_tokens=True)
+
                 response = self.pipeline(
-                    prompt,
-                    max_new_tokens=400,
+                    truncated_prompt,
+                    max_new_tokens=max_output_tokens,
                     do_sample=True,
                     temperature=0.7,
                     top_p=0.9,

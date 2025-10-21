@@ -9,11 +9,13 @@ from tqdm import tqdm
 from src.pdf_extractor import PDFExtractor
 from src.text_chunker import TextChunker
 from src.note_generator import NoteGenerator
+from src.api_note_generator import APIBasedNoteGenerator
 from src.markdown_formatter import MarkdownFormatter
+from src.gpu_optimizer import GPUOptimizer
 
 
 @click.command()
-@click.argument('pdf_path', type=click.Path(exists=True))
+@click.argument('pdf_path', type=click.Path(exists=True), required=False)
 @click.option('--model', '-m', default="microsoft/DialoGPT-medium",
               help='HuggingFace model to use for note generation')
 @click.option('--chunk-size', '-c', default=2048,
@@ -28,7 +30,15 @@ from src.markdown_formatter import MarkdownFormatter
               help='Device to use: auto, cpu, cuda, or mps')
 @click.option('--pages', '-p', default=None,
               help='Page range to process (e.g., "1-10" or "5,7,9-12")')
-def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pages):
+@click.option('--auto-optimize', is_flag=True, default=True,
+              help='Automatically optimize settings based on GPU (default: True)')
+@click.option('--show-gpu-info', is_flag=True,
+              help='Show GPU analysis and exit')
+@click.option('--use-api', is_flag=True,
+              help='Use Claude API instead of local models (requires CLAUDE_KEY in .env)')
+@click.option('--api-model', default="claude-3-5-sonnet-20241022",
+              help='Claude API model to use (sonnet or haiku)')
+def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pages, auto_optimize, show_gpu_info, use_api, api_model):
     """
     Extract and generate structured notes from PDF documents.
 
@@ -36,9 +46,44 @@ def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pag
     optimized for knowledge management systems like Obsidian.
     """
 
+    # Initialize GPU optimizer
+    gpu_optimizer = GPUOptimizer()
+
+    # Show GPU info and exit if requested
+    if show_gpu_info:
+        gpu_optimizer.print_gpu_analysis()
+        return
+
+    # Check if PDF path is provided when not showing GPU info
+    if not pdf_path:
+        click.echo("❌ Error: PDF_PATH is required unless using --show-gpu-info", err=True)
+        click.echo("Try 'python main.py --help' for usage information.")
+        sys.exit(1)
+
+    # Auto-optimize settings if enabled (skip if using API)
+    if auto_optimize and not use_api:
+        optimized = gpu_optimizer.get_optimized_settings()
+
+        # Override defaults with optimized settings if not explicitly set by user
+        if model == "microsoft/DialoGPT-medium":  # Default model
+            model = optimized['recommended_model']
+        if chunk_size == 2048:  # Default chunk size
+            chunk_size = optimized['chunk_size']
+
+        click.echo("🎯 GPU Auto-Optimization Enabled")
+        click.echo(f"   Detected: {optimized['gpu_name']} ({optimized['vram_gb']}GB)")
+        click.echo(f"   Tier: {optimized.get('performance_tier', 'Basic')}")
+
     click.echo(f"🔍 Processing PDF: {pdf_path}")
-    click.echo(f"🤖 Using model: {model}")
-    click.echo(f"📱 Device: {device}")
+
+    if use_api:
+        click.echo(f"🌐 Using Claude API: {api_model}")
+        click.echo(f"💰 Note: API calls will consume tokens from your account")
+    else:
+        click.echo(f"🤖 Using local model: {model}")
+        click.echo(f"📱 Device: {device}")
+
+    click.echo(f"📏 Chunk size: {chunk_size} tokens")
 
     if not os.path.exists(pdf_path):
         click.echo(f"❌ Error: PDF file not found: {pdf_path}", err=True)
@@ -90,7 +135,10 @@ def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pag
 
         # Initialize note generator
         click.echo("🧠 Loading language model...")
-        note_generator = NoteGenerator(model_name=model, device=device)
+        if use_api:
+            note_generator = APIBasedNoteGenerator(model_name=api_model)
+        else:
+            note_generator = NoteGenerator(model_name=model, device=device)
 
         # Generate notes
         click.echo("✍️ Generating notes...")
