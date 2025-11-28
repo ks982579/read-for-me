@@ -42,12 +42,16 @@ class APIBasedNoteGenerator:
         self.model_name = model_name
         print(f"✅ Initialized Claude API with model: {model_name}")
 
-    def generate_note_from_chunk(self, chunk: TextChunk) -> GeneratedNote:
+    def generate_note_from_chunk(self, chunk: TextChunk,
+                                  temperature: float = 0.7,
+                                  max_tokens: int = 4096) -> GeneratedNote:
         """
         Generate a structured note from a text chunk using Claude API.
 
         Args:
             chunk: TextChunk containing the content to process
+            temperature: Controls randomness (0.7 = balanced, lower = more focused)
+            max_tokens: Maximum tokens to generate
 
         Returns:
             GeneratedNote with formatted content
@@ -57,8 +61,8 @@ class APIBasedNoteGenerator:
         try:
             message = self.client.messages.create(
                 model=self.model_name,
-                max_tokens=1024,
-                temperature=0.7,
+                max_tokens=max_tokens,
+                temperature=temperature,
                 messages=[
                     {
                         "role": "user",
@@ -89,22 +93,51 @@ class APIBasedNoteGenerator:
 
     def _create_note_prompt(self, text: str, chapter_title: str = "") -> str:
         """Create an optimized prompt for Claude API."""
-        base_prompt = """Create comprehensive, structured technical notes from the following text.
+        base_prompt = """Create comprehensive, detailed technical notes from the following text. Your goal is to capture substantive content, not just surface-level summaries.
 
-Focus on:
-- Key concepts and definitions
-- Important technical details and explanations
-- Main takeaways and insights
-- Code examples, algorithms, or formulas mentioned
-- Connections between ideas
+IMPORTANT: Focus on depth over brevity. Include:
 
-Format your notes as clear, concise bullet points or short paragraphs. Make them useful for studying and reference.
-"""
+**Definitions & Terminology:**
+- Define all key terms, concepts, and specialized vocabulary
+- Explain what things ARE, not just that they exist
+- Include formal definitions where provided
+
+**Concepts & Theories:**
+- Explain the core ideas and how they work
+- Describe the reasoning, logic, or proof behind concepts
+- Include the "why" and "how", not just the "what"
+- Capture theoretical frameworks and mental models
+
+**Technical Details:**
+- Preserve specific technical explanations, mechanisms, and processes
+- Include algorithms, formulas, equations, and their explanations
+- Document code examples with context about what they demonstrate
+- Note important parameters, constraints, or conditions
+
+**Relationships & Context:**
+- Show how concepts connect to and build upon each other
+- Explain cause-and-effect relationships
+- Note comparisons, contrasts, or trade-offs discussed
+- Identify prerequisites or dependencies
+
+**Examples & Applications:**
+- Include concrete examples that illustrate abstract concepts
+- Document use cases, scenarios, or practical applications
+- Note any warnings, common mistakes, or edge cases
+
+**Format Guidelines:**
+- Use paragraph form for complex explanations that need flow
+- Use bullet points for lists, steps, or distinct items
+- Use headers (###) to organize major topics
+- Preserve the logical structure and progression of ideas
+- Cut marketing fluff, redundant introductions, and filler, but keep substantive content
+
+Write notes as if for a graduate student who needs to deeply understand the material, not just get a high-level overview."""
 
         if chapter_title:
-            return f"{base_prompt}\nChapter: {chapter_title}\n\nText to summarize:\n{text}"
+            return f"{base_prompt}\n\nChapter: {chapter_title}\n\nText to analyze:\n\n{text}"
         else:
-            return f"{base_prompt}\nText to summarize:\n{text}"
+            return f"{base_prompt}\n\nText to analyze:\n\n{text}"
 
     def _clean_generated_note(self, note: str) -> str:
         """Clean up the generated note by removing unnecessary prefixes."""
@@ -139,12 +172,17 @@ Format your notes as clear, concise bullet points or short paragraphs. Make them
 
         return "• " + "\n• ".join(key_sentences)
 
-    def generate_notes_batch(self, chunks: List[TextChunk]) -> List[GeneratedNote]:
+    def generate_notes_batch(self,
+                            chunks: List[TextChunk],
+                            temperature: float = 0.7,
+                            max_tokens: int = 4096) -> List[GeneratedNote]:
         """
         Generate notes for a batch of chunks.
 
         Args:
             chunks: List of TextChunk objects to process
+            temperature: Controls randomness (lower = more focused)
+            max_tokens: Maximum tokens per note
 
         Returns:
             List of GeneratedNote objects
@@ -152,6 +190,10 @@ Format your notes as clear, concise bullet points or short paragraphs. Make them
         notes = []
         for i, chunk in enumerate(chunks):
             print(f"Processing chunk {i+1}/{len(chunks)} (Page {chunk.source_pages[0] if chunk.source_pages else 'Unknown'})")
-            note = self.generate_note_from_chunk(chunk)
+            note = self.generate_note_from_chunk(
+                chunk,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
             notes.append(note)
         return notes

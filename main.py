@@ -1,3 +1,9 @@
+"""
+models:
+- mistralai/Mistral-7B-Instruct-v0.3
+- meta-llama/Meta-Llama-3.1-8B-Instruct
+- Qwen/Qwen2.5-7B-Instruct
+"""
 #!/usr/bin/env python3
 
 import click
@@ -61,18 +67,18 @@ def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pag
         sys.exit(1)
 
     # Auto-optimize settings if enabled (skip if using API)
-    if auto_optimize and not use_api:
-        optimized = gpu_optimizer.get_optimized_settings()
+    # if auto_optimize and not use_api:
+    optimized = gpu_optimizer.get_optimized_settings()
 
         # Override defaults with optimized settings if not explicitly set by user
-        if model == "microsoft/DialoGPT-medium":  # Default model
-            model = optimized['recommended_model']
-        if chunk_size == 2048:  # Default chunk size
-            chunk_size = optimized['chunk_size']
+       # if model == "microsoft/DialoGPT-medium":  # Default model
+       #     model = optimized['recommended_model']
+       # if chunk_size == 2048:  # Default chunk size
+       #     chunk_size = optimized['chunk_size']
 
-        click.echo("🎯 GPU Auto-Optimization Enabled")
-        click.echo(f"   Detected: {optimized['gpu_name']} ({optimized['vram_gb']}GB)")
-        click.echo(f"   Tier: {optimized.get('performance_tier', 'Basic')}")
+    click.echo("🎯 GPU Auto-Optimization Enabled")
+    click.echo(f"   Detected: {optimized['gpu_name']} ({optimized['vram_gb']}GB)")
+    click.echo(f"   Tier: {optimized.get('performance_tier', 'Basic')}")
 
     click.echo(f"🔍 Processing PDF: {pdf_path}")
 
@@ -99,16 +105,18 @@ def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pag
             if pages:
                 # Parse page specification
                 page_list = parse_pages(pages)
-                extracted_sections = []
-                for page_num in page_list:
-                    text = extractor.get_text_by_pages(page_num-1, page_num)
-                    if text.strip():
-                        from src.pdf_extractor import ExtractedText
-                        extracted_sections.append(ExtractedText(
-                            content=text,
-                            page_number=page_num,
-                            chapter_title=""
-                        ))
+                # Extract all requested pages as ONE continuous block
+                # This allows chunk_size to span across page boundaries
+                text = extractor.get_text_by_pages(page_list[0]-1, page_list[-1])
+                if text.strip():
+                    from src.pdf_extractor import ExtractedText
+                    extracted_sections = [ExtractedText(
+                        content=text,
+                        page_number=page_list[0],  # Mark starting page
+                        chapter_title=""
+                    )]
+                else:
+                    extracted_sections = []
             else:
                 extracted_sections = extractor.extract_text()
 
@@ -142,12 +150,19 @@ def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pag
 
         # Generate notes
         click.echo("✍️ Generating notes...")
-        with tqdm(total=len(all_chunks), desc="Processing chunks") as pbar:
-            notes = []
-            for chunk in all_chunks:
-                note = note_generator.generate_note_from_chunk(chunk)
-                notes.append(note)
-                pbar.update(1)
+
+        # todo: remove
+        with open('./dodo.log', 'w') as file:
+            with tqdm(total=len(all_chunks), desc="Processing chunks") as pbar:
+                notes = []
+                for chunk in all_chunks:
+                    note = note_generator.generate_note_from_chunk(chunk)
+                    notes.append(note)
+                    file.write(chunk.content + '\n\n')
+                    file.write('---' * 20 + '\n\n')
+                    file.write(note.content + '\n\n')
+                    file.write('===' * 20 + '\n\n')
+                    pbar.update(1)
 
         # Format and save notes
         click.echo("📋 Formatting notes...")
@@ -192,6 +207,8 @@ def parse_pages(pages_str):
 
     return sorted(list(set(pages)))
 
+def kevstest():
+    Path("")
 
 if __name__ == '__main__':
     main()

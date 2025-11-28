@@ -66,7 +66,7 @@ class PDFExtractor:
 
         text_content = []
         for page_num in range(start_page, min(end_page, len(self.doc))):
-            page = self.doc[page_num]
+            page: pymupdf.Page = self.doc[page_num]
             text = page.get_text()
             if text.strip():
                 text_content.append(self._clean_text(text))
@@ -82,3 +82,4 @@ class PDFExtractor:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
