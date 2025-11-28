@@ -1,3 +1,11 @@
+"""
+Ollama does best results.
+However, -c 256 -o 64 was only OK.
+Trying -c 1024 -o 128
+
+python main.py ./ebooks/<book>.pdf -c 1024 -o 128
+"""
+
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import torch
 from typing import List, Dict
@@ -22,7 +30,8 @@ class NoteGenerator:
         # NOTE: Forcing DeepSeek here
         # self.model_name = model_name
         # self.model_name = "deepseek-r1:8b" # must have pulled
-        self.model_name = "llama3.1:8b" # must have pulled | uses 94% GPU-Util
+        # self.model_name = "llama3.1:8b" # must have pulled | uses 94% GPU-Util
+        self.model_name = "qwen3:8b" # must have pulled | uses 94% GPU-Util
         self.ollama_url = "http://localhost:11434/api/generate"
     
     def generate_note_from_chunk(self, chunk: TextChunk) -> GeneratedNote:
@@ -35,9 +44,12 @@ class NoteGenerator:
                     "model": self.model_name,
                     "prompt": prompt,
                     "stream": False,
+                    "system": "You are an expert at creating concise, technical study notes. Extract only substantive information and cut out the fluff. Never write placeholder text like 'non provided'. If a section does not apply please skip it entirely.",
                     "options": {
-                        "temperature": 0.7,
+                        "temperature": 0.6, # lower temp for more focus
                         # "num_predict": 800
+                        "num_ctx": 8192,
+                        "top_p": 0.9,
                     }
                 }
             )
@@ -63,16 +75,18 @@ class NoteGenerator:
             )
     
     def _create_note_prompt(self, text: str, chapter_title: str = "") -> str:
-        base_prompt = """Create comprehensive study notes from this text. Extract:
-- All key definitions and terminology
-- Technical explanations of how things work
-- Formulas, algorithms, or code examples
-- Relationships between concepts
-- Concrete examples
+        base_prompt = """Extract detailed study notes from this text. Focus on substantive content:
 
-Write in clear paragraphs and bullet points. Preserve all important technical content.
+1. Define any key terms or concepts with full explanations
+2. Explain technical mechanisms, processes, or theories
+3. Include formulas, algorithms, or technical details if present
+4. Show how concepts relate to each other
+5. Provide concrete examples that illustrate the ideas
 
-Text: """
+Write clear, detailed notes. Use bullet points for lists and paragraphs for complex explanations. Skip any section that doesn't apply - don't write "none provided."
+
+Text to summarize:
+"""
         
         if chapter_title:
             return f"Chapter: {chapter_title}\n\n{base_prompt}{text}\n\nNotes:"
