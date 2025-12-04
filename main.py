@@ -18,6 +18,7 @@ from src.note_generator import NoteGenerator
 from src.api_note_generator import APIBasedNoteGenerator
 from src.markdown_formatter import MarkdownFormatter
 from src.gpu_optimizer import GPUOptimizer
+from src.bookmark_chunker import BookmarkChunker
 
 
 @click.command()
@@ -44,7 +45,9 @@ from src.gpu_optimizer import GPUOptimizer
               help='Use Claude API instead of local models (requires CLAUDE_KEY in .env)')
 @click.option('--api-model', default="claude-3-5-sonnet-20241022",
               help='Claude API model to use (sonnet or haiku)')
-def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pages, auto_optimize, show_gpu_info, use_api, api_model):
+@click.option('--auto', is_flag=True,
+              help='Auto-detect book structure from PDF bookmarks (recommended)')
+def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pages, auto_optimize, show_gpu_info, use_api, api_model, auto):
     """
     Extract and generate structured notes from PDF documents.
 
@@ -82,6 +85,9 @@ def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pag
 
     click.echo(f"🔍 Processing PDF: {pdf_path}")
 
+    if auto:
+        click.echo(f"📚 Auto mode: Will detect structure from PDF bookmarks")
+
     if use_api:
         click.echo(f"🌐 Using Claude API: {api_model}")
         click.echo(f"💰 Note: API calls will consume tokens from your account")
@@ -99,47 +105,79 @@ def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pag
         # Initialize components
         click.echo("🔧 Initializing components...")
 
-        with PDFExtractor(pdf_path) as extractor:
-            # Extract text from PDF
-            click.echo("📖 Extracting text from PDF...")
-            if pages:
-                # Parse page specification
-                page_list = parse_pages(pages)
-                # Extract all requested pages as ONE continuous block
-                # This allows chunk_size to span across page boundaries
-                text = extractor.get_text_by_pages(page_list[0]-1, page_list[-1])
-                if text.strip():
-                    from src.pdf_extractor import ExtractedText
-                    extracted_sections = [ExtractedText(
-                        content=text,
-                        page_number=page_list[0],  # Mark starting page
-                        chapter_title=""
-                    )]
-                else:
-                    extracted_sections = []
-            else:
-                extracted_sections = extractor.extract_text()
+        # Parse page range if specified
+        start_page, end_page = None, None
+        if pages:
+            page_list = parse_pages(pages)
+            start_page = page_list[0]  # 1-based
+            end_page = page_list[-1]   # 1-based
+            click.echo(f"📄 Page range: {start_page}-{end_page}")
 
-            if not extracted_sections:
-                click.echo("❌ No text extracted from PDF", err=True)
-                sys.exit(1)
-
-            click.echo(f"📄 Extracted {len(extracted_sections)} sections")
-
-        # Initialize chunker and chunk text
-        click.echo("✂️ Chunking text...")
-        chunker = TextChunker(max_chunk_size=chunk_size, overlap_size=overlap)
-
+        # Try auto mode (bookmark-based chunking) if --auto flag is set
+        use_bookmark_chunking = False
         all_chunks = []
-        for section in extracted_sections:
-            chunks = chunker.smart_chunk(
-                section.content,
-                [section.page_number],
-                section.chapter_title
-            )
-            all_chunks.extend(chunks)
 
-        click.echo(f"📝 Created {len(all_chunks)} text chunks")
+        if auto:
+            click.echo("🔍 Checking for PDF bookmarks...")
+            try:
+                with BookmarkChunker(pdf_path, chunk_size, overlap) as chunker:
+                    if chunker.has_bookmarks():
+                        click.echo("✅ Bookmarks found! Using structure-aware chunking...")
+                        use_bookmark_chunking = True
+
+                        # Extract structured chunks
+                        all_chunks = chunker.chunk_by_bookmarks(start_page, end_page)
+
+                        if not all_chunks:
+                            click.echo("⚠️  No content in specified page range", err=True)
+                            sys.exit(1)
+
+                        click.echo(f"📚 Created {len(all_chunks)} structured chunks")
+                    else:
+                        click.echo("⚠️  No bookmarks found, falling back to token-based chunking...")
+            except Exception as e:
+                click.echo(f"⚠️  Bookmark extraction failed: {e}")
+                click.echo("   Falling back to token-based chunking...")
+
+        # Fallback to traditional token-based chunking if auto mode failed or not requested
+        if not use_bookmark_chunking:
+            with PDFExtractor(pdf_path) as extractor:
+                # Extract text from PDF
+                click.echo("📖 Extracting text from PDF...")
+                if pages:
+                    # Extract specified page range as one continuous block
+                    text = extractor.get_text_by_pages(start_page - 1, end_page)
+                    if text.strip():
+                        from src.pdf_extractor import ExtractedText
+                        extracted_sections = [ExtractedText(
+                            content=text,
+                            page_number=start_page,
+                            chapter_title=""
+                        )]
+                    else:
+                        extracted_sections = []
+                else:
+                    extracted_sections = extractor.extract_text()
+
+                if not extracted_sections:
+                    click.echo("❌ No text extracted from PDF", err=True)
+                    sys.exit(1)
+
+                click.echo(f"📄 Extracted {len(extracted_sections)} sections")
+
+            # Initialize chunker and chunk text
+            click.echo("✂️ Chunking text...")
+            chunker = TextChunker(max_chunk_size=chunk_size, overlap_size=overlap)
+
+            for section in extracted_sections:
+                chunks = chunker.smart_chunk(
+                    section.content,
+                    [section.page_number],
+                    section.chapter_title
+                )
+                all_chunks.extend(chunks)
+
+            click.echo(f"📝 Created {len(all_chunks)} text chunks")
 
         # Initialize note generator
         click.echo("🧠 Loading language model...")
@@ -151,39 +189,61 @@ def main(pdf_path, model, chunk_size, overlap, output_dir, obsidian, device, pag
         # Generate notes
         click.echo("✍️ Generating notes...")
 
-        # todo: remove
-        with open('./dodo.log', 'w') as file:
+        # Generate notes differently based on chunking mode
+        if use_bookmark_chunking:
+            # For structured chunks, pair them with generated notes
+            structured_notes = []
+
+            with tqdm(total=len(all_chunks), desc="Processing chunks") as pbar:
+                for chunk in all_chunks:
+                    # Generate note for this structured chunk
+                    note = note_generator.generate_note_from_chunk(chunk)
+                    structured_notes.append((chunk, note))
+                    pbar.update(1)
+
+            # Format structured notes with hierarchy
+            click.echo("📋 Formatting structured notes...")
+            formatter = MarkdownFormatter(output_dir)
+            markdown_content = formatter.format_structured_notes_to_markdown(
+                structured_notes,
+                pdf_path,
+                model_name=note_generator.model_name
+            )
+
+        else:
+            # Traditional note generation and formatting
             with tqdm(total=len(all_chunks), desc="Processing chunks") as pbar:
                 notes = []
                 for chunk in all_chunks:
                     note = note_generator.generate_note_from_chunk(chunk)
                     notes.append(note)
-                    file.write(chunk.content + '\n\n')
-                    file.write('---' * 20 + '\n\n')
-                    file.write(note.content + '\n\n')
-                    file.write('===' * 20 + '\n\n')
                     pbar.update(1)
 
-        # Format and save notes
-        click.echo("📋 Formatting notes...")
-        formatter = MarkdownFormatter(output_dir)
+            # Format and save notes
+            click.echo("📋 Formatting notes...")
+            formatter = MarkdownFormatter(output_dir)
 
-        if obsidian:
-            markdown_content = formatter.create_obsidian_compatible_note(notes, pdf_path)
-        else:
-            markdown_content = formatter.format_notes_to_markdown(notes, pdf_path)
+            if obsidian:
+                markdown_content = formatter.create_obsidian_compatible_note(notes, pdf_path)
+            else:
+                markdown_content = formatter.format_notes_to_markdown(
+                    notes,
+                    pdf_path,
+                    model_name=note_generator.model_name
+                )
 
         output_path = formatter.save_markdown_file(markdown_content, pdf_path)
 
-        # Generate summary
-        summary_content = formatter.create_summary_section(notes, pdf_path)
-        summary_path = output_path.replace('.md', '_summary.md')
-        with open(summary_path, 'w', encoding='utf-8') as f:
-            f.write(summary_content)
+        # Generate summary (only for traditional mode)
+        if not use_bookmark_chunking:
+            summary_content = formatter.create_summary_section(notes, pdf_path)
+            summary_path = output_path.replace('.md', '_summary.md')
+            with open(summary_path, 'w', encoding='utf-8') as f:
+                f.write(summary_content)
+            click.echo(f"📊 Summary saved to: {summary_path}")
 
         click.echo(f"✅ Notes saved to: {output_path}")
-        click.echo(f"📊 Summary saved to: {summary_path}")
-        click.echo(f"📈 Generated {len(notes)} notes from {len(all_chunks)} chunks")
+        click.echo(f"📈 Generated notes from {len(all_chunks)} chunks")
 
     except Exception as e:
         click.echo(f"❌ Error processing PDF: {str(e)}", err=True)

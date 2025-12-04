@@ -1,6 +1,7 @@
 import os
+import pymupdf
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Union
 from .note_generator import GeneratedNote
 
 
@@ -9,13 +10,14 @@ class MarkdownFormatter:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
-    def format_notes_to_markdown(self, notes: List[GeneratedNote], pdf_filename: str) -> str:
+    def format_notes_to_markdown(self, notes: List[GeneratedNote], pdf_filename: str, model_name: str = "unknown") -> str:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         base_filename = os.path.splitext(os.path.basename(pdf_filename))[0]
 
         markdown_content = []
         markdown_content.append(f"# Notes: {base_filename}")
         markdown_content.append(f"*Generated on: {timestamp}*")
+        markdown_content.append(f"*Model: {model_name}*")
         markdown_content.append("")
 
         current_chapter = ""
@@ -156,3 +158,179 @@ class MarkdownFormatter:
                 obsidian_content.append("")
 
         return "\n".join(obsidian_content)
+
+    def extract_pdf_metadata(self, pdf_path: str) -> Dict[str, str]:
+        """
+        Extract metadata from PDF for frontmatter.
+
+        Args:
+            pdf_path: Path to PDF file
+
+        Returns:
+            Dictionary with title, author, subject, etc.
+        """
+        try:
+            doc = pymupdf.open(pdf_path)
+            metadata = doc.metadata
+
+            # Clean up metadata values (remove None, empty strings)
+            cleaned = {
+                'title': metadata.get('title', '').strip() or os.path.splitext(os.path.basename(pdf_path))[0],
+                'author': metadata.get('author', '').strip() or 'Unknown',
+                'subject': metadata.get('subject', '').strip() or '',
+                'keywords': metadata.get('keywords', '').strip() or '',
+                'creator': metadata.get('creator', '').strip() or '',
+                'producer': metadata.get('producer', '').strip() or '',
+            }
+
+            doc.close()
+            return cleaned
+        except Exception:
+            # Fallback if metadata extraction fails
+            return {
+                'title': os.path.splitext(os.path.basename(pdf_path))[0],
+                'author': 'Unknown',
+                'subject': '',
+                'keywords': '',
+                'creator': '',
+                'producer': '',
+            }
+
+    def format_structured_notes_to_markdown(
+        self,
+        notes: List[tuple],  # List of (StructuredChunk, GeneratedNote) pairs
+        pdf_path: str,
+        model_name: str = "unknown"
+    ) -> str:
+        """
+        Format notes from StructuredChunk objects into hierarchical markdown.
+
+        Creates output that mirrors the book's structure with proper heading levels
+        and includes metadata frontmatter.
+
+        Args:
+            notes: List of (StructuredChunk, GeneratedNote) tuples
+            pdf_path: Path to the source PDF
+            model_name: Name of the model used to generate notes
+
+        Returns:
+            Formatted markdown string
+        """
+        metadata = self.extract_pdf_metadata(pdf_path)
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+
+        markdown_lines = []
+
+        # YAML frontmatter with metadata
+        markdown_lines.append("---")
+        markdown_lines.append(f"title: {metadata['title']}")
+        if metadata['author'] and metadata['author'] != 'Unknown':
+            # Handle multiple authors (split by semicolon or comma)
+            authors = [a.strip() for a in metadata['author'].replace(';', ',').split(',')]
+            markdown_lines.append("authors:")
+            for author in authors:
+                if author:
+                    markdown_lines.append(f"  - {author}")
+        else:
+            markdown_lines.append("authors: []")
+
+        if metadata['subject']:
+            markdown_lines.append(f"subject: {metadata['subject']}")
+        markdown_lines.append(f"generated: {timestamp}")
+        markdown_lines.append(f"model: {model_name}")
+        markdown_lines.append("---")
+        markdown_lines.append("")
+
+        # Track current chapter/section to avoid repeating headers
+        current_chapter = None
+        current_section = None
+
+        for chunk, note in notes:
+            # Determine markdown heading level based on bookmark level
+            # Level 1 (chapter) -> # (h1)
+            # Level 2 (section) -> ## (h2)
+            # Level 3 (subsection) -> ### (h3)
+            # Level 4 (sub-subsection) -> #### (h4)
+            heading_prefix = '#' * chunk.level
+
+            # Create section identifier
+            section_id = f"{chunk.number} {chunk.title}" if chunk.number else chunk.title
+
+            # Skip duplicate headers (important when sections are split)
+            # We track chapter and section separately to avoid re-printing headers
+            if chunk.level == 1:
+                if current_chapter != section_id:
+                    markdown_lines.append(f"{heading_prefix} {section_id}")
+                    markdown_lines.append("")
+                    markdown_lines.append(f"> p. {chunk.start_page}")  # 0-based page number
+                    markdown_lines.append("")
+                    current_chapter = section_id
+                    current_section = None  # Reset section when new chapter
+            elif chunk.level == 2:
+                # Check if we need to insert missing chapter header
+                # This happens when page filtering skips the chapter but includes sections
+                chapter_id = f"{chunk.chapter_number} {chunk.chapter_title}" if chunk.chapter_number else chunk.chapter_title
+                if current_chapter != chapter_id and chunk.chapter_number:
+                    # Insert missing chapter header (without notes, just structure)
+                    markdown_lines.append(f"# {chapter_id}")
+                    markdown_lines.append("")
+                    markdown_lines.append(f"> p. {chunk.start_page}")  # Best guess - same page as first section
+                    markdown_lines.append("")
+                    markdown_lines.append("*[Chapter header - no separate notes generated]*")
+                    markdown_lines.append("")
+                    current_chapter = chapter_id
+
+                if current_section != section_id:
+                    markdown_lines.append(f"{heading_prefix} {section_id}")
+                    markdown_lines.append("")
+                    markdown_lines.append(f"> p. {chunk.start_page}")  # 0-based page number
+                    markdown_lines.append("")
+                    current_section = section_id
+            else:
+                # For level 3+ (subsections), check if we need parent section header
+                # This handles cases where subsections are in range but parent section isn't
+                if chunk.parent_section and chunk.parent_section_title:
+                    parent_section_id = f"{chunk.parent_section} {chunk.parent_section_title}"
+
+                    # Check if we need to insert the parent section header
+                    # (i.e., we haven't seen this parent section yet)
+                    if current_section != parent_section_id:
+                        # Also check if we need chapter header first
+                        chapter_id = f"{chunk.chapter_number} {chunk.chapter_title}" if chunk.chapter_number else chunk.chapter_title
+                        if current_chapter != chapter_id and chunk.chapter_number:
+                            # Insert missing chapter header
+                            markdown_lines.append(f"# {chapter_id}")
+                            markdown_lines.append("")
+                            markdown_lines.append(f"> p. {chunk.start_page}")
+                            markdown_lines.append("")
+                            markdown_lines.append("*[Chapter header - no separate notes generated]*")
+                            markdown_lines.append("")
+                            current_chapter = chapter_id
+
+                        # Insert the parent section header
+                        markdown_lines.append(f"## {parent_section_id}")
+                        markdown_lines.append("")
+                        markdown_lines.append(f"> p. {chunk.start_page}")
+                        markdown_lines.append("")
+                        markdown_lines.append("*[Section header - content starts with subsections below]*")
+                        markdown_lines.append("")
+                        current_section = parent_section_id
+
+                # Always print subsection headers (level 3+)
+                markdown_lines.append(f"{heading_prefix} {section_id}")
+                markdown_lines.append("")
+                markdown_lines.append(f"> p. {chunk.start_page}")  # 0-based page number
+                markdown_lines.append("")
+
+            # Add note content
+            if note and note.content.strip():
+                formatted_content = self._format_note_content(note.content)
+                markdown_lines.append(formatted_content)
+                markdown_lines.append("")
+
+                # If this is a split chunk, indicate it's a continuation
+                if chunk.is_split and chunk.split_index < chunk.total_splits - 1:
+                    markdown_lines.append(f"*[Continued in part {chunk.split_index + 2}/{chunk.total_splits}...]*")
+                    markdown_lines.append("")
+
+        return "\n".join(markdown_lines)

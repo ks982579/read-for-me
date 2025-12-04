@@ -1,0 +1,26 @@
+Create study notes from the following text.
+
+STRUCTURE YOUR NOTES THIS WAY:
+
+For concepts and explanations: Write in paragraph form. Explain what something is, why it matters, and how it works.
+
+For definitions: Write as "Term: definition explanation" in prose, not bullets.
+
+For lists, steps, or multiple examples: Use bullet points.
+
+For code: Include the actual code snippet with a brief explanation of what it does.
+
+WHAT TO INCLUDE:
+- Key concepts with full explanations
+- Technical mechanisms and how they work
+- Relationships between ideas
+- Concrete examples that illustrate concepts
+- Formulas, algorithms, or code with context
+- Why something matters or when to use it
+
+WHAT TO SKIP:
+- Fluff, introductory remarks, or meta-commentary
+- Sections with no technical content
+- Don't write "none provided" or similar placeholders
+
+Text to analyze:
