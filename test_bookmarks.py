@@ -1,49 +1,61 @@
 #!/usr/bin/env python3
 """
-Test if PDF has extractable bookmarks/outline.
+Utility script to check if a PDF has bookmarks and preview its structure.
+
+Usage:
+    python test_bookmarks.py path/to/your/book.pdf
 """
 
+import sys
 import pymupdf
 
-pdf_path = "./ebooks/IntelligentTechsForDS/IntelligentTechniquesForDataScience.pdf"
 
-def check_bookmarks():
-    doc = pymupdf.open(pdf_path)
+def check_bookmarks(pdf_path):
+    """Check if PDF has bookmarks and display structure."""
+    try:
+        doc = pymupdf.open(pdf_path)
+        toc = doc.get_toc()
 
-    toc = doc.get_toc()
+        if not toc:
+            print("❌ No bookmarks found in PDF")
+            print("\nThis PDF will fall back to token-based chunking.")
+            print("Consider using --pages flag to process specific sections.")
+            doc.close()
+            return
 
-    if not toc:
-        print("❌ No bookmarks found in PDF")
-        return
+        print(f"✅ Found {len(toc)} bookmark entries")
+        print("\n" + "="*80)
+        print("BOOKMARK STRUCTURE (first 30 entries):")
+        print("="*80)
 
-    print(f"✅ Found {len(toc)} bookmark entries")
-    print("\n" + "="*80)
-    print("BOOKMARK STRUCTURE (first 30 entries):")
-    print("="*80)
+        for i, entry in enumerate(toc[:30]):
+            level, title, page = entry
+            indent = "  " * (level - 1)
+            print(f"{indent}[Level {level}] {title} → Page {page}")
 
-    for i, entry in enumerate(toc[:30]):
-        level, title, page = entry
-        indent = "  " * (level - 1)
-        print(f"{indent}[Level {level}] {title} → Page {page}")
+        if len(toc) > 30:
+            print(f"\n... and {len(toc) - 30} more entries")
 
-    if len(toc) > 30:
-        print(f"\n... and {len(toc) - 30} more entries")
+        print("\n" + "="*80)
+        print("RECOMMENDATION:")
+        print("="*80)
+        print("This PDF has good bookmark structure.")
+        print("Use --auto flag for best results:")
+        print(f"  python main.py {pdf_path} --auto --use-api")
 
-    print("\n" + "="*80)
-    print("ANALYSIS:")
-    print("="*80)
+        doc.close()
 
-    # Check if it matches our index.yaml expectations
-    chapter_1 = [e for e in toc if "Introduction to Data Science" in e[1]]
-    if chapter_1:
-        print(f"✅ Chapter 1 found at page {chapter_1[0][2]}")
-        print(f"   (Expected: page 16 based on our testing)")
+    except Exception as e:
+        print(f"❌ Error reading PDF: {e}")
+        sys.exit(1)
 
-    chapter_2 = [e for e in toc if "Data Analytics" in e[1] and "Chapter" in str(e)]
-    if chapter_2:
-        print(f"✅ Chapter 2 found at page {chapter_2[0][2]}")
-
-    doc.close()
 
 if __name__ == "__main__":
-    check_bookmarks()
+    if len(sys.argv) < 2:
+        print("Usage: python test_bookmarks.py <pdf_path>")
+        print("\nExample:")
+        print("  python test_bookmarks.py ./ebooks/book.pdf")
+        sys.exit(1)
+
+    pdf_path = sys.argv[1]
+    check_bookmarks(pdf_path)

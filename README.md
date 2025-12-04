@@ -4,12 +4,14 @@ An intelligent PDF processing tool that extracts technical content from ebooks a
 
 ## Features
 
-- **PDF Text Extraction**: Uses pymupdf for reliable text extraction from technical documents
-- **Intelligent Chunking**: Smart text segmentation that preserves context and handles overlaps
-- **AI-Powered Note Generation**: Choose between local HuggingFace models or Claude API
-- **Claude API Support**: High-quality notes without GPU requirements (NEW!)
-- **Markdown Output**: Generates clean markdown compatible with Obsidian and other note-taking apps
-- **GPU Acceleration**: Supports CUDA, MPS, and CPU for flexible hardware requirements
+- **Automatic Structure Detection**: Extracts table of contents from PDF bookmarks
+- **Heading-Based Extraction**: Precisely extracts content between section headings (not just page boundaries)
+- **Hierarchical Notes**: Output mirrors the book's structure (chapters → sections → subsections)
+- **AI-Powered Note Generation**: Choose between local models (Ollama) or Claude API
+- **Claude API Support**: High-quality notes without GPU requirements
+- **Markdown Output**: Generates structured markdown with YAML frontmatter
+- **Page Range Filtering**: Test single chapters before processing entire books
+- **Model Comparison**: Track which model generated each note for quality comparison
 - **Configurable Processing**: Customizable chunk sizes, models, and output formats
 
 ## Installation
@@ -40,12 +42,29 @@ An intelligent PDF processing tool that extracts technical content from ebooks a
 
 ## Usage
 
-### Quick Start: Claude API (Recommended for Limited GPU)
+### Quick Start: Auto Mode (Recommended)
 
-Process a PDF using Claude API (no GPU required):
+Process a PDF with automatic structure detection:
 ```bash
-python main.py path/to/your/document.pdf --use-api
+python main.py path/to/your/document.pdf --auto --use-api
 ```
+
+The `--auto` flag enables bookmark-based chunking which:
+- Extracts document structure from PDF bookmarks
+- Creates hierarchical notes matching the book's organization
+- Provides precise section-by-section extraction
+
+### Test Single Chapter First
+
+```bash
+# Check if PDF has bookmarks
+python test_bookmarks.py path/to/your/document.pdf
+
+# Process specific pages (recommended for testing)
+python main.py path/to/your/document.pdf --auto --use-api --pages 1-30
+```
+
+### Claude API (No GPU Required)
 
 Use the faster/cheaper Haiku model:
 ```bash

@@ -69,13 +69,29 @@ Bookmark levels directly map to document structure:
 - **Level 3** = Subsections (e.g., "1.5.1 Managing Data Flow")
 - **Level 4** = Sub-subsections (rare, very detailed sections)
 
-### 3. Text Extraction
+### 3. Heading-Based Text Extraction (NEW!)
 
-For each bookmark, the system:
-1. Extracts text from the bookmark's page to the next bookmark's page
-2. Counts tokens in the extracted content
-3. If too large, splits using `TextChunker` with overlap
-4. Creates `StructuredChunk` objects with hierarchy metadata
+Instead of extracting between page numbers, the system finds actual headings in text:
+
+1. **Start at bookmark's page** (as hint for location)
+2. **Search for section heading** in page text (e.g., "1.1 Introduction")
+3. **Extract content after heading**
+4. **Continue to next pages** searching for next heading (e.g., "1.2 History")
+5. **Stop when next heading found** - only content for current section extracted
+
+**Why this matters**: If section 1.2 starts mid-way through a page, we stop exactly at that heading instead of including it in section 1.1's content.
+
+**Handles variable formats**:
+- "1.1 Introduction" (section number + title)
+- "1.1\tIntroduction" (tabs between number and title)
+- "Chapter 1\nTitle" (chapter with prefix on separate line)
+
+### 4. Token Counting & Splitting
+
+For each extracted section:
+1. Counts tokens in the extracted content
+2. If too large, splits using `TextChunker` with overlap
+3. Creates `StructuredChunk` objects with hierarchy metadata
 
 ### 4. Page Range Filtering (--pages flag)
 
