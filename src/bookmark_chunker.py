@@ -336,9 +336,38 @@ class BookmarkChunker:
         found_start = False
         start_position = 0
 
-        # Search for the start heading and extract until end heading
+        # First, search backward and forward from bookmark page to find start heading
+        # This handles cases where PDF bookmarks point to wrong pages
+        actual_start_page = None
+        search_range = [start_page - 1, start_page, start_page + 1, start_page + 2]  # ±2 pages from bookmark
+
+        for search_page in search_range:
+            if search_page < 0 or search_page >= len(self.doc):
+                continue
+
+            page = self.doc[search_page]
+            page_text = page.get_text()
+
+            if not page_text.strip():
+                continue
+
+            start_pos = self.find_heading_in_text(
+                page_text,
+                start_heading_title,
+                start_section_number
+            )
+
+            if start_pos >= 0:
+                actual_start_page = search_page
+                break
+
+        # If start heading not found within ±2 pages, give up
+        if actual_start_page is None:
+            return ""
+
+        # Now extract from actual_start_page to end heading
         for page_offset in range(max_pages):
-            page_num = start_page + page_offset
+            page_num = actual_start_page + page_offset
 
             if page_num >= len(self.doc):
                 break
@@ -390,11 +419,6 @@ class BookmarkChunker:
                             break
 
                         current_pos = line_end + 1  # +1 for newline
-                else:
-                    # Heading not found on expected page - take the whole page as fallback
-                    # This handles cases where bookmark page is slightly off
-                    found_start = True
-                    content_parts.append(page_text)
 
             elif found_start:
                 # We're past the start heading, look for end heading

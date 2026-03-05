@@ -1,0 +1,16 @@
+# TTS Audiobook Generation Requirements
+# Install with: pip install -r requirements-tts.txt
+
+# Core TTS engine
+TTS>=0.22.0
+
+# Audio processing
+pydub>=0.25.1
+
+# Audio file manipulation (required by pydub for MP3)
+# Note: Also requires ffmpeg to be installed on system
+# Install ffmpeg: sudo apt install ffmpeg (Linux) or brew install ffmpeg (Mac)
+
+# Already in main requirements.txt but listing for completeness:
+# torch>=2.0.0
+# numpy>=1.24.0
